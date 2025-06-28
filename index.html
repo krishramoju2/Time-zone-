@@ -78,6 +78,11 @@
       }
     }
 
+    function roundToNearest15(dt) {
+      const roundedMinutes = Math.round(dt.minute / 15) * 15;
+      return dt.set({ minute: roundedMinutes, second: 0, millisecond: 0 });
+    }
+
     function findOverlap() {
       const resultDiv = document.getElementById("result");
       resultDiv.innerHTML = "";
@@ -88,30 +93,42 @@
       }
 
       const cityBlocks = {};
+
       try {
         for (const city of cities) {
           const zone = city;
           const today = DateTime.now().setZone(zone).startOf("day");
           if (!today.isValid) throw new Error(`Invalid timezone: ${city}`);
 
-          const blocks = [];
+          const blocks = new Set();
+
           for (let hour = 9; hour <= 20; hour++) {
             const localTime = today.set({ hour });
-            blocks.push(localTime.toUTC().toISO());
+            const roundedUTC = roundToNearest15(localTime.toUTC());
+            blocks.add(roundedUTC.toISO({ suppressMilliseconds: true, suppressSeconds: true }));
           }
+
           cityBlocks[city] = blocks;
         }
 
-        const overlap = Object.values(cityBlocks).reduce((a, b) => a.filter(x => b.includes(x)));
+        const overlapping = [...cityBlocks[cities[0]]];
+        for (let i = 1; i < cities.length; i++) {
+          const nextSet = cityBlocks[cities[i]];
+          for (let j = overlapping.length - 1; j >= 0; j--) {
+            if (!nextSet.has(overlapping[j])) {
+              overlapping.splice(j, 1);
+            }
+          }
+        }
 
-        if (overlap.length === 0) {
+        if (overlapping.length === 0) {
           resultDiv.innerHTML = "<strong>No overlapping time slots between 9AM–8PM in all time zones.</strong>";
           return;
         }
 
         resultDiv.innerHTML = `<h3>Overlapping Time Slots:</h3>`;
-        overlap.forEach(utcTime => {
-          const utc = DateTime.fromISO(utcTime, { zone: "utc" });
+        overlapping.sort().forEach(utcTimeStr => {
+          const utc = DateTime.fromISO(utcTimeStr, { zone: "utc" });
           const block = document.createElement("div");
           block.className = "city-time";
           block.innerHTML = `<strong>UTC:</strong> ${utc.toFormat("HH:mm")}<br><br>`;
@@ -127,7 +144,6 @@
       }
     }
 
-    // Set initial city list display
     updateCityList();
   </script>
 </body>

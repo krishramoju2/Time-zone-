@@ -50,7 +50,7 @@
   <div class="results" id="result"></div>
 
   <script>
-    const { DateTime } = luxon;
+    const { DateTime, Interval } = luxon;
     let cities = [];
 
     function addCity() {
@@ -78,11 +78,6 @@
       }
     }
 
-    function roundToNearest15(dt) {
-      const roundedMinutes = Math.round(dt.minute / 15) * 15;
-      return dt.set({ minute: roundedMinutes, second: 0, millisecond: 0 });
-    }
-
     function findOverlap() {
       const resultDiv = document.getElementById("result");
       resultDiv.innerHTML = "";
@@ -92,52 +87,50 @@
         return;
       }
 
-      const cityBlocks = {};
+      let utcIntervals = [];
 
       try {
         for (const city of cities) {
-          const zone = city;
-          const today = DateTime.now().setZone(zone).startOf("day");
-          if (!today.isValid) throw new Error(`Invalid timezone: ${city}`);
+          const startLocal = DateTime.now().setZone(city).startOf("day").plus({ hours: 9 });
+          const endLocal = DateTime.now().setZone(city).startOf("day").plus({ hours: 20 });
 
-          const blocks = new Set();
-
-          for (let hour = 9; hour <= 20; hour++) {
-            const localTime = today.set({ hour });
-            const roundedUTC = roundToNearest15(localTime.toUTC());
-            blocks.add(roundedUTC.toISO({ suppressMilliseconds: true, suppressSeconds: true }));
+          if (!startLocal.isValid || !endLocal.isValid) {
+            throw new Error(`Invalid timezone: ${city}`);
           }
 
-          cityBlocks[city] = blocks;
+          // Convert to UTC
+          const startUTC = startLocal.toUTC();
+          const endUTC = endLocal.toUTC();
+
+          utcIntervals.push(Interval.fromDateTimes(startUTC, endUTC));
         }
 
-        const overlapping = [...cityBlocks[cities[0]]];
-        for (let i = 1; i < cities.length; i++) {
-          const nextSet = cityBlocks[cities[i]];
-          for (let j = overlapping.length - 1; j >= 0; j--) {
-            if (!nextSet.has(overlapping[j])) {
-              overlapping.splice(j, 1);
-            }
-          }
+        // Find overlapping interval across all cities
+        let overlap = utcIntervals[0];
+        for (let i = 1; i < utcIntervals.length; i++) {
+          overlap = overlap.intersection(utcIntervals[i]);
+          if (!overlap) break;
         }
 
-        if (overlapping.length === 0) {
+        if (!overlap || overlap.length("minutes") < 1) {
           resultDiv.innerHTML = "<strong>No overlapping time slots between 9AM–8PM in all time zones.</strong>";
           return;
         }
 
+        // Display overlapping blocks every 30 minutes within the overlapping interval
         resultDiv.innerHTML = `<h3>Overlapping Time Slots:</h3>`;
-        overlapping.sort().forEach(utcTimeStr => {
-          const utc = DateTime.fromISO(utcTimeStr, { zone: "utc" });
+        let current = overlap.start;
+        while (current <= overlap.end) {
           const block = document.createElement("div");
           block.className = "city-time";
-          block.innerHTML = `<strong>UTC:</strong> ${utc.toFormat("HH:mm")}<br><br>`;
+          block.innerHTML = `<strong>UTC:</strong> ${current.toFormat("HH:mm")}<br><br>`;
           cities.forEach(city => {
-            const local = utc.setZone(city);
+            const local = current.setZone(city);
             block.innerHTML += `<strong>${city}:</strong> ${local.toFormat("hh:mm a")}<br>`;
           });
           resultDiv.appendChild(block);
-        });
+          current = current.plus({ minutes: 30 });
+        }
 
       } catch (err) {
         resultDiv.innerHTML = `<p style="color:red;">Error: ${err.message}</p>`;

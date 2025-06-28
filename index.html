@@ -1,1 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>TimeZoneBuddy 🌍</title>
+  <script src="https://cdn.jsdelivr.net/npm/luxon@3/build/global/luxon.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f0f4f8;
+      padding: 2rem;
+      color: #333;
+    }
+    h1 {
+      color: #2c3e50;
+    }
+    input, button {
+      padding: 0.5rem;
+      margin: 0.3rem;
+      font-size: 1rem;
+    }
+    .city-list {
+      margin-top: 1rem;
+    }
+    .results {
+      margin-top: 2rem;
+      padding: 1rem;
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    }
+    .city-time {
+      margin: 1rem 0;
+      padding: 0.5rem;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      background: #f9f9f9;
+    }
+  </style>
+</head>
+<body>
+  <h1>TimeZoneBuddy 🌐</h1>
+  <p>Enter at least 2 cities (e.g., New York, London, Tokyo):</p>
+  <input type="text" id="cityInput" placeholder="Enter a city name..." />
+  <button onclick="addCity()">Add City</button>
+  <button onclick="clearCities()">Clear Cities</button>
+  <div class="city-list" id="cityList"></div>
+  <button onclick="findOverlap()">Find Overlap</button>
 
+  <div class="results" id="result"></div>
+
+  <script>
+    const { DateTime } = luxon;
+    let cities = [];
+
+    function addCity() {
+      const input = document.getElementById("cityInput");
+      const city = input.value.trim();
+      if (city && !cities.includes(city)) {
+        cities.push(city);
+        updateCityList();
+        input.value = "";
+      }
+    }
+
+    function clearCities() {
+      cities = [];
+      updateCityList();
+      document.getElementById("result").innerHTML = "";
+    }
+
+    function updateCityList() {
+      const listDiv = document.getElementById("cityList");
+      listDiv.innerHTML = `<strong>Cities:</strong> ${cities.join(", ")}`;
+    }
+
+    async function getTimeZone(city) {
+      const response = await fetch("https://worldtimeapi.org/api/timezone");
+      const timezones = await response.json();
+      const match = timezones.find(tz =>
+        tz.toLowerCase().includes(city.toLowerCase().replace(/\s/g, "_"))
+      );
+      return match || null;
+    }
+
+    async function findOverlap() {
+      if (cities.length < 2) {
+        alert("Please enter at least two cities.");
+        return;
+      }
+
+      const resultDiv = document.getElementById("result");
+      resultDiv.innerHTML = "<p>Calculating overlap...</p>";
+
+      // Step 1: Resolve all cities to timezones
+      const tzMap = {};
+      for (const city of cities) {
+        const tz = await getTimeZone(city);
+        if (!tz) {
+          alert(`Could not find timezone for "${city}"`);
+          return;
+        }
+        tzMap[city] = tz;
+      }
+
+      // Step 2: Get 9AM–8PM local time blocks in UTC
+      const cityBlocks = {};
+      for (const city of cities) {
+        const zone = tzMap[city];
+        const today = DateTime.now().setZone(zone).startOf("day");
+        const blocks = [];
+        for (let hour = 9; hour <= 20; hour++) {
+          const localTime = today.set({ hour });
+          blocks.push(localTime.toUTC().toISO());
+        }
+        cityBlocks[city] = blocks;
+      }
+
+      // Step 3: Find common UTC time slots
+      const blockArrays = Object.values(cityBlocks);
+      const overlap = blockArrays.reduce((acc, arr) => acc.filter(x => arr.includes(x)));
+
+      if (overlap.length === 0) {
+        resultDiv.innerHTML = "<strong>No overlapping time slots found between 9AM–8PM in all cities.</strong>";
+        return;
+      }
+
+      // Step 4: Display result
+      resultDiv.innerHTML = `<h3>Common Time Slots (${overlap.length}):</h3>`;
+      overlap.forEach(utcTime => {
+        const utc = DateTime.fromISO(utcTime, { zone: "utc" });
+        const block = document.createElement("div");
+        block.className = "city-time";
+        block.innerHTML = `<strong>UTC:</strong> ${utc.toFormat("HH:mm")}<br>`;
+        cities.forEach(city => {
+          const local = utc.setZone(tzMap[city]);
+          block.innerHTML += `${city}: ${local.toFormat("hh:mm a")} (${tzMap[city]})<br>`;
+        });
+        resultDiv.appendChild(block);
+      });
+    }
+  </script>
+</body>
+</html>
